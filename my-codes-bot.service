@@ -1,0 +1,17 @@
+[Unit]
+Description=my-codes-bot (Telegram bot for gift card codes)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/my-codes-bot
+EnvironmentFile=/root/my-codes-bot/.env
+ExecStart=/root/my-codes-bot/.venv/bin/python -m app.bot
+Restart=always
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target
