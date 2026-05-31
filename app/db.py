@@ -391,3 +391,27 @@ async def get_transaction(tx_id: int, user_id: int) -> Optional[TransactionRow]:
         async with db.execute(sql, (tx_id, user_id)) as cur:
             row = await cur.fetchone()
             return TransactionRow(*row) if row else None
+
+
+
+async def taken_codes_by_user(user_id: int) -> list[tuple[str, str, str, str]]:
+    """Все коды, которые когда-либо были выданы этому пользователю.
+
+    Берётся напрямую из таблицы codes (status='taken', taken_by=user_id),
+    поэтому работает даже для старых выдач, сделанных до того, как коды
+    стали сохраняться в transactions.codes.
+
+    Возвращает список (group_name, category_name, code, taken_at),
+    отсортированный по времени выдачи.
+    """
+    sql = """
+        SELECT g.name, c.name, k.code, k.taken_at
+        FROM codes k
+        JOIN categories c ON c.id = k.category_id
+        JOIN groups g ON g.id = c.group_id
+        WHERE k.status = 'taken' AND k.taken_by = ?
+        ORDER BY k.taken_at, g.name, c.name, k.id
+    """
+    async with _connect() as db:
+        async with db.execute(sql, (user_id,)) as cur:
+            return [(r[0], r[1], r[2], r[3]) for r in await cur.fetchall()]

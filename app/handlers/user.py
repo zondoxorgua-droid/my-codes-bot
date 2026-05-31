@@ -246,8 +246,9 @@ async def show_history_codes(call: CallbackQuery) -> None:
     if not codes_list:
         # старые выдачи, сделанные до обновления — коды не сохранялись
         await call.message.answer(
-            f"{head}\n\nК сожалению, для этой выдачи коды не сохранены "
-            "(она была сделана до обновления бота).",
+            f"{head}\n\nЗдесь коды отдельной выдачи не сохранены "
+            "(она была до обновления). Но их можно достать кнопкой "
+            "<b>«Выгрузить ВСЕ мои коды файлом»</b> — там будут все выданные тебе коды.",
         )
         await call.answer()
         return
@@ -265,3 +266,57 @@ async def show_history_codes(call: CallbackQuery) -> None:
             caption=f"{tx.category_name} — {len(codes_list)} шт.",
         )
     await call.answer()
+
+
+# ============================================================
+# Recover: выгрузить ВСЕ выданные пользователю коды (включая старые)
+# ============================================================
+
+def _build_recovery_file(rows: list) -> tuple[bytes, int]:
+    """Из списка (group, category, code, taken_at) строит содержимое .txt.
+
+    Группирует по (группа → категория), внутри сохраняет порядок (по времени).
+    Возвращает (payload_bytes, total_codes).
+    """
+    grouped: dict[str, list[str]] = {}
+    for group_name, cat_name, code, taken_at in rows:
+        key = f"{group_name} · {cat_name}"
+        grouped.setdefault(key, []).append(code)
+
+    lines: list[str] = []
+    total = 0
+    for key, codes in grouped.items():
+        lines.append(f"=== {key} ({len(codes)} шт.) ===")
+        lines.extend(codes)
+        lines.append("")  # пустая строка-разделитель
+        total += len(codes)
+    return ("\n".join(lines).strip() + "\n").encode("utf-8"), total
+
+
+@router.callback_query(F.data == kb.CB_MAIN_RECOVER)
+async def recover_cb(call: CallbackQuery) -> None:
+    rows = await db.taken_codes_by_user(call.from_user.id)
+    if not rows:
+        await call.answer("Тебе ещё не выдавались коды", show_alert=True)
+        return
+    payload, total = _build_recovery_file(rows)
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    await call.message.answer_document(
+        BufferedInputFile(payload, filename=f"my_codes_{total}_{ts}.txt"),
+        caption=f"Все выданные тебе коды: <b>{total}</b> шт.",
+    )
+    await call.answer("Готово")
+
+
+@router.message(Command("recover"))
+async def recover_cmd(message: Message) -> None:
+    rows = await db.taken_codes_by_user(message.from_user.id)
+    if not rows:
+        await message.answer("Тебе ещё не выдавались коды.")
+        return
+    payload, total = _build_recovery_file(rows)
+    ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+    await message.answer_document(
+        BufferedInputFile(payload, filename=f"my_codes_{total}_{ts}.txt"),
+        caption=f"Все выданные тебе коды: <b>{total}</b> шт.",
+    )

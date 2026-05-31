@@ -15,6 +15,7 @@ CB_MAIN_STOCK = "main:stock"
 CB_MAIN_HISTORY = "main:history"
 CB_MAIN_ADMIN = "main:admin"
 CB_MAIN_ROOT = "main:root"  # вернуться в главное меню
+CB_MAIN_RECOVER = "main:recover"  # выгрузить все выданные мне коды файлом
 
 # take flow
 CB_GROUP = "grp:"            # grp:<id>
@@ -145,6 +146,7 @@ def history_kb(rows: list) -> InlineKeyboardMarkup:
             text=f"{i}. {r.category_name} · {r.count} шт.",
             callback_data=f"{CB_HIST_ITEM}{r.id}",
         )
+    b.button(text="Выгрузить ВСЕ мои коды файлом", callback_data=CB_MAIN_RECOVER)
     b.button(text="« В меню", callback_data=CB_MAIN_ROOT)
     b.adjust(1)
     return b.as_markup()
