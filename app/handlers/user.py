@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import io
+import logging
 from datetime import datetime
 
 from aiogram import F, Router
@@ -15,6 +16,7 @@ from app.config import MAX_TAKE_PER_REQUEST, TEXT_OUTPUT_THRESHOLD
 from app.states import TakeCodes
 
 router = Router(name="user")
+log = logging.getLogger("my-codes-bot.issue")
 
 
 # ============================================================
@@ -133,6 +135,13 @@ async def take_deliver(call: CallbackQuery, state: FSMContext) -> None:
         )
         await call.answer()
         return
+
+    # Лог выдачи — страховка: коды останутся в journalctl, даже если потеряются в чате
+    uname = f"@{call.from_user.username}" if call.from_user.username else "—"
+    log.info(
+        "ВЫДАЧА | user_id=%s %s | %s | %s шт. | коды: %s",
+        call.from_user.id, uname, cat_name, len(codes), ", ".join(codes),
+    )
 
     head = f"<b>{cat_name}</b> — выдано {len(codes)} шт."
 
