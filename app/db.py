@@ -50,6 +50,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     user_id     INTEGER NOT NULL,
     category_id INTEGER NOT NULL,
     count       INTEGER NOT NULL,
+    codes       TEXT,                                  -- сами выданные коды, по одному на строку
     taken_at    TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -84,10 +85,12 @@ class Category:
 
 @dataclass(frozen=True)
 class TransactionRow:
+    id: int
     group_name: str
     category_name: str
     count: int
     taken_at: str
+    codes: str = ""  # сами коды, по одному на строку
 
 
 # ---------- INIT ----------
@@ -97,7 +100,17 @@ async def init_db() -> None:
     async with aiosqlite.connect(DB_PATH) as db:
         await db.execute("PRAGMA foreign_keys = ON")
         await db.executescript(SCHEMA)
+        await _migrate(db)
         await db.commit()
+
+
+async def _migrate(db: aiosqlite.Connection) -> None:
+    """Лёгкие миграции для уже существующих баз."""
+    # transactions.codes — добавлен позже, чтобы хранить сами выданные коды
+    async with db.execute("PRAGMA table_info(transactions)") as cur:
+        cols = {row[1] for row in await cur.fetchall()}
+    if "codes" not in cols:
+        await db.execute("ALTER TABLE transactions ADD COLUMN codes TEXT")
 
 
 def _connect() -> aiosqlite.Connection:
@@ -338,8 +351,8 @@ async def take_codes(category_id: int, user_id: int, count: int) -> list[str]:
                 (user_id, *ids),
             )
             await db.execute(
-                "INSERT INTO transactions(user_id, category_id, count) VALUES(?, ?, ?)",
-                (user_id, category_id, len(ids)),
+                "INSERT INTO transactions(user_id, category_id, count, codes) VALUES(?, ?, ?, ?)",
+                (user_id, category_id, len(ids), "\n".join(codes)),
             )
             await db.commit()
             return codes
@@ -352,7 +365,7 @@ async def take_codes(category_id: int, user_id: int, count: int) -> list[str]:
 
 async def user_history(user_id: int, limit: int = 30) -> list[TransactionRow]:
     sql = """
-        SELECT g.name, c.name, t.count, t.taken_at
+        SELECT t.id, g.name, c.name, t.count, t.taken_at, COALESCE(t.codes, '')
         FROM transactions t
         JOIN categories c ON c.id = t.category_id
         JOIN groups g ON g.id = c.group_id
@@ -363,3 +376,18 @@ async def user_history(user_id: int, limit: int = 30) -> list[TransactionRow]:
     async with _connect() as db:
         async with db.execute(sql, (user_id, limit)) as cur:
             return [TransactionRow(*r) for r in await cur.fetchall()]
+
+
+async def get_transaction(tx_id: int, user_id: int) -> Optional[TransactionRow]:
+    """Одна транзакция данного пользователя (чтобы не дать читать чужие коды)."""
+    sql = """
+        SELECT t.id, g.name, c.name, t.count, t.taken_at, COALESCE(t.codes, '')
+        FROM transactions t
+        JOIN categories c ON c.id = t.category_id
+        JOIN groups g ON g.id = c.group_id
+        WHERE t.id = ? AND t.user_id = ?
+    """
+    async with _connect() as db:
+        async with db.execute(sql, (tx_id, user_id)) as cur:
+            row = await cur.fetchone()
+            return TransactionRow(*row) if row else None

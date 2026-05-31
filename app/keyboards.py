@@ -39,6 +39,9 @@ CB_USER_REMOVE = "usr:rm"
 CB_CONFIRM_DEL_GROUP = "delgrp:"  # delgrp:<id>
 CB_CONFIRM_DEL_CAT = "delcat:"    # delcat:<id>
 
+# history
+CB_HIST_ITEM = "hist:"            # hist:<tx_id> — показать коды выдачи заново
+
 CB_NOOP = "noop"
 
 
@@ -128,4 +131,20 @@ def confirm_kb(yes_data: str, no_data: str = CB_MAIN_ADMIN) -> InlineKeyboardMar
 def cancel_kb() -> InlineKeyboardMarkup:
     b = InlineKeyboardBuilder()
     b.button(text="Отмена", callback_data=CB_MAIN_ROOT)
+    return b.as_markup()
+
+
+def history_kb(rows: list) -> InlineKeyboardMarkup:
+    """Кнопка на каждую выдачу — повторно показать её коды.
+
+    rows: список TransactionRow (берём .id, .category_name, .count).
+    """
+    b = InlineKeyboardBuilder()
+    for i, r in enumerate(rows, start=1):
+        b.button(
+            text=f"{i}. {r.category_name} · {r.count} шт.",
+            callback_data=f"{CB_HIST_ITEM}{r.id}",
+        )
+    b.button(text="« В меню", callback_data=CB_MAIN_ROOT)
+    b.adjust(1)
     return b.as_markup()

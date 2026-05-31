@@ -196,23 +196,63 @@ async def _stock_text() -> str:
 
 @router.callback_query(F.data == kb.CB_MAIN_HISTORY)
 async def show_history_cb(call: CallbackQuery) -> None:
-    text = await _history_text(call.from_user.id)
-    await call.message.edit_text(text, reply_markup=kb.back_to_main())
+    rows = await db.user_history(call.from_user.id, limit=15)
+    text = _history_text(rows)
+    markup = kb.history_kb(rows) if rows else kb.back_to_main()
+    await call.message.edit_text(text, reply_markup=markup)
     await call.answer()
 
 
 @router.message(Command("history"))
 async def show_history_cmd(message: Message, user_role: str) -> None:
-    text = await _history_text(message.from_user.id)
-    await message.answer(text, reply_markup=kb.main_menu(user_role == "admin"))
+    rows = await db.user_history(message.from_user.id, limit=15)
+    text = _history_text(rows)
+    markup = kb.history_kb(rows) if rows else kb.main_menu(user_role == "admin")
+    await message.answer(text, reply_markup=markup)
 
 
-async def _history_text(user_id: int) -> str:
-    rows = await db.user_history(user_id, limit=30)
+def _history_text(rows: list) -> str:
     if not rows:
         return "У тебя ещё нет выдач."
-    lines = ["<b>Последние выдачи</b>", ""]
-    for r in rows:
-        # taken_at в формате 'YYYY-MM-DD HH:MM:SS'
-        lines.append(f"<code>{r.taken_at}</code> · {r.group_name} · {r.category_name} · <b>{r.count}</b>")
+    lines = ["<b>Последние выдачи</b>", "Нажми на любую, чтобы снова получить её коды.", ""]
+    for i, r in enumerate(rows, start=1):
+        lines.append(
+            f"<b>{i}.</b> <code>{r.taken_at}</code> · {r.group_name} · "
+            f"{r.category_name} · <b>{r.count}</b> шт."
+        )
     return "\n".join(lines)
+
+
+@router.callback_query(F.data.startswith(kb.CB_HIST_ITEM))
+async def show_history_codes(call: CallbackQuery) -> None:
+    tx_id = int(call.data.removeprefix(kb.CB_HIST_ITEM))
+    tx = await db.get_transaction(tx_id, call.from_user.id)
+    if not tx:
+        await call.answer("Выдача не найдена", show_alert=True)
+        return
+
+    codes_list = [c for c in (tx.codes or "").split("\n") if c]
+    head = f"<b>{tx.category_name}</b> — {tx.count} шт. · <code>{tx.taken_at}</code>"
+
+    if not codes_list:
+        # старые выдачи, сделанные до обновления — коды не сохранялись
+        await call.message.answer(
+            f"{head}\n\nК сожалению, для этой выдачи коды не сохранены "
+            "(она была сделана до обновления бота).",
+        )
+        await call.answer()
+        return
+
+    if len(codes_list) <= TEXT_OUTPUT_THRESHOLD:
+        body = "\n".join(f"<code>{c}</code>" for c in codes_list)
+        await call.message.answer(f"{head}\n\n{body}")
+    else:
+        ts = datetime.utcnow().strftime("%Y%m%d_%H%M%S")
+        safe_name = "".join(ch for ch in tx.category_name if ch.isalnum() or ch in ("-", "_")) or "codes"
+        filename = f"{safe_name}_{len(codes_list)}_{ts}.txt"
+        payload = "\n".join(codes_list).encode("utf-8")
+        await call.message.answer_document(
+            BufferedInputFile(payload, filename=filename),
+            caption=f"{tx.category_name} — {len(codes_list)} шт.",
+        )
+    await call.answer()
